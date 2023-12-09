@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, shrink-to-fit=no"
+    />
+    <title>stlite app</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.42.3/build/stlite.css"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.42.3/build/stlite.js"></script>
+    <script>
+      stlite.mount(
+        {
+          requirements: ["matplotlib"],
+          entrypoint: "app.py",
+          files: {
+            "land_price_kanto.csv": {
+              url: "./land_price_kanto.csv",
+              opts: {
+                encoding: "utf8",
+              },
+            },
+            "app.py": `
+            import streamlit as st
+import pandas as pd
+import numpy as np
+import pydeck as pdk
+import matplotlib
+
+def get_filtered_map(original_df, selected_year):
+    # calulate price min/max
+    min_price, max_price = np.inf, 0
+    for key in original_df.columns:
+        if "price" in key:
+            series = original_df[key][original_df[key] > 0]
+            min_price = min(min_price, series.min())
+            max_price = max(max_price, series.max())
+    min_price_log, max_price_log = np.log(min_price), np.log(max_price)
+    # Query by selected year
+    key = f"price_{selected_year}"
+    query_df = original_df[original_df[key] > 0]
+    df = query_df.loc[:, ["latitude", "longitude", key, "address", "usage", "description"]]
+    # Set color for drawing
+    normalized_log_price = (np.log(df[key]) - min_price_log) / (max_price_log - min_price_log)
+    cmap = matplotlib.colormaps["plasma"]  
+    df["color"] = normalized_log_price.apply(lambda x: [y*255.0 for y in cmap(x)])
+    # Set radius for drawing
+    df["radius"] = normalized_log_price * 200
+    df["formatted_price"] = df[key].apply(lambda x: "{:,}".format(x))
+    # Map component
+    return st.pydeck_chart(pdk.Deck(
+        map_style=None,
+        initial_view_state=pdk.ViewState(
+            latitude=35.685175,
+            longitude=139.7528,
+            zoom=11,
+            bearing=0, pitch=30
+        ),
+        layers=[
+            pdk.Layer(
+                "ScatterplotLayer",
+                df,
+                pickable=True,
+                opacity=0.5,
+                stroked=True,
+                filled=True,
+                radius_min_pixels=3,
+                radius_max_pixels=50,
+                line_width_min_pixels=1,
+                radius_scale=1,
+                get_position="[longitude, latitude]",
+                get_radius="radius",
+                get_fill_color="color",
+                get_line_color=[0, 0, 0],
+            )
+        ],
+        tooltip={"text": "公示価格:{formatted_price}\n{address}\n{usage}\n{description}"},
+    ))
+
+def main():
+    st.set_page_config(layout="wide")
+    st.title("Land Prices in Kanto")
+
+    df = pd.read_csv("land_price_kanto.csv")
+    years = [int(col.split("_")[1]) for col in df.columns if "price" in col]
+
+    selected_year = st.slider("Select year", min_value=min(years), max_value=max(years), value=max(years))
+    if selected_year:
+        draw_map = get_filtered_map(df, selected_year)
+
+if __name__ == "__main__":
+    main()`,
+          },
+        },
+        document.getElementById("root")
+      );
+    </script>
+  </body>
+</html>
